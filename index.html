@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบวิเคราะห์ข้อมูลสาธารณสุขและจัดทำเล่มตรวจนิเทศ สสจ. (AI Vision OCR Pipeline)</title>
+
+    <!-- โหลด PDF.js สำหรับแปลงหน้า PDF เป็นรูปภาพบนเบราว์เซอร์ก่อนส่งให้ LM Studio Vision (OCR) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <!-- โหลด Marked.js สำหรับแสดงตัวอย่างตาราง Markdown และส่งออก Word แบบตารางจริง -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        :root {
+            --bg-app: #eff5f2;
+            --bg-card: #ffffff;
+            --bg-subtle: #f7faf8;
+            --primary: #14533c;
+            --primary-hover: #0d3b2a;
+            --primary-soft: #e4f3ec;
+            --accent: #0f766e;
+            --accent-gold: #92400e;
+            --accent-gold-soft: #fef3c7;
+            --text-main: #1e293b;
+            --text-muted: #475569;
+            --border-color: #d2e0d9;
+            --border-focus: #14533c;
+            --danger-bg: #fee2e2;
+            --danger-text: #991b1b;
+            --shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.04);
+            --shadow-md: 0 8px 24px rgba(20, 83, 60, 0.08);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif, 'Sarabun';
+            background-color: var(--bg-app);
+            color: var(--text-main);
+            margin: 0;
+            padding: 24px;
+            line-height: 1.6;
+        }
+
+        .app-header {
+            max-width: 1560px;
+            margin: 0 auto 22px auto;
+            background: linear-gradient(135deg, #0d3b2a 0%, #14533c 55%, #1d7052 100%);
+            color: #ffffff;
+            padding: 22px 30px;
+            border-radius: 16px;
+            box-shadow: var(--shadow-md);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 14px;
+        }
+
+        .app-header h1 {
+            margin: 0;
+            font-size: 1.38rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+        }
+
+        .app-header p {
+            margin: 4px 0 0 0;
+            font-size: 0.88rem;
+            color: #d1fae5;
+        }
+
+        .app-badge {
+            background: rgba(255, 255, 255, 0.14);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            padding: 7px 15px;
+            border-radius: 999px;
+            font-size: 0.82rem;
+            font-weight: 600;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 335px 1fr;
+            gap: 24px;
+            width: 100%;
+            max-width: 1560px;
+            margin: 0 auto;
+            align-items: start;
+        }
+
+        .sidebar {
+            background-color: var(--bg-card);
+            padding: 22px;
+            border-radius: 16px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+            position: sticky;
+            top: 20px;
+        }
+
+        .sidebar h2, .sidebar h3 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            font-size: 0.98rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .step-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 3px;
+            width: 100%;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            background-color: var(--bg-subtle);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            border-radius: 11px;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .step-btn-title {
+            font-size: 0.92rem;
+            font-weight: 700;
+        }
+
+        .step-btn-sub {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        .step-btn:hover {
+            border-color: var(--primary);
+            background-color: var(--primary-soft);
+        }
+
+        .step-btn.active {
+            background-color: var(--primary-soft);
+            color: var(--primary);
+            border-color: var(--primary);
+            box-shadow: inset 4px 0 0 var(--primary);
+        }
+
+        .step-btn.active .step-btn-sub {
+            color: #164e34;
+        }
+
+        .workflow-box {
+            background-color: var(--accent-gold-soft);
+            border: 1px solid #fde68a;
+            color: var(--accent-gold);
+            padding: 12px 14px;
+            border-radius: 10px;
+            font-size: 0.8rem;
+            margin-top: 14px;
+            line-height: 1.55;
+        }
+
+        .param-group {
+            margin-top: 20px;
+            padding-top: 18px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.83rem;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 9px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.87rem;
+            background-color: var(--bg-subtle);
+            color: var(--text-main);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            background-color: #ffffff;
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px rgba(20, 83, 60, 0.12);
+        }
+
+        .temp-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .temp-badge {
+            min-width: 40px;
+            text-align: center;
+            background: var(--primary-soft);
+            color: var(--primary);
+            font-weight: 700;
+            font-size: 0.85rem;
+            padding: 3px 8px;
+            border-radius: 6px;
+        }
+
+        .workspace {
+            display: flex;
+            flex-direction: column;
+            gap: 22px;
+        }
+
+        .card {
+            background-color: var(--bg-card);
+            padding: 24px 28px;
+            border-radius: 16px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .card-title {
+            margin: 0;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .card-desc {
+            margin: 0 0 16px 0;
+            font-size: 0.88rem;
+            color: var(--text-muted);
+        }
+
+        .file-input-wrapper {
+            margin-bottom: 18px;
+            padding: 20px;
+            background-color: var(--bg-subtle);
+            border: 1.5px dashed #7aa893;
+            border-radius: 12px;
+            text-align: center;
+            transition: border-color 0.2s, background-color 0.2s;
+        }
+
+        .file-input-wrapper:hover {
+            border-color: var(--primary);
+            background-color: var(--primary-soft);
+        }
+
+        .btn-group-center {
+            margin-top: 14px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            padding: 10px 18px;
+            border: 1px solid transparent;
+            border-radius: 9px;
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-extract {
+            background-color: var(--primary-soft);
+            color: var(--primary);
+            border-color: #b2d8c5;
+        }
+
+        .btn-extract:hover:not(:disabled) {
+            background-color: #d1ebde;
+        }
+
+        .btn-send {
+            background-color: var(--primary);
+            color: #ffffff;
+            margin-top: 14px;
+            width: 100%;
+            padding: 13px 20px;
+            font-size: 0.98rem;
+            box-shadow: 0 4px 12px rgba(20, 83, 60, 0.22);
+        }
+
+        .btn-send:hover:not(:disabled) {
+            background-color: var(--primary-hover);
+        }
+
+        .btn-minor {
+            padding: 7px 13px;
+            font-size: 0.83rem;
+            border-radius: 8px;
+        }
+
+        .btn-copy {
+            background-color: var(--primary-soft);
+            color: var(--primary);
+            border-color: #c1e0d0;
+        }
+
+        .btn-copy:hover {
+            background-color: #d1ebde;
+        }
+
+        .btn-transfer {
+            background-color: #fef3c7;
+            color: #92400e;
+            border-color: #fde68a;
+        }
+
+        .btn-transfer:hover {
+            background-color: #fde68a;
+        }
+
+        .btn-clear {
+            background-color: var(--danger-bg);
+            color: var(--danger-text);
+            border-color: #fecaca;
+        }
+
+        .btn-clear:hover {
+            background-color: #fecaca;
+        }
+
+        .btn-download {
+            background-color: #e0f2fe;
+            color: #0369a1;
+            border-color: #bae6fd;
+        }
+
+        .btn-download:hover {
+            background-color: #bae6fd;
+        }
+
+        .field-label {
+            font-weight: 600;
+            font-size: 0.88rem;
+            display: block;
+            margin-bottom: 7px;
+            color: var(--text-main);
+        }
+
+        textarea {
+            width: 100%;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 14px 16px;
+            font-family: 'Consolas', 'Segoe UI', 'Sarabun', monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            color: var(--text-main);
+            background-color: #ffffff;
+            resize: vertical;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px rgba(20, 83, 60, 0.12);
+        }
+
+        #systemPromptBox {
+            min-height: 290px;
+            background-color: #fcfefd;
+        }
+
+        .output-section {
+            margin-top: 26px;
+            padding-top: 22px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .action-bar {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .view-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .tab-btn {
+            padding: 6px 14px;
+            font-size: 0.83rem;
+            font-weight: 600;
+            border-radius: 7px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-subtle);
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+
+        .tab-btn.active {
+            background: var(--primary);
+            color: #ffffff;
+            border-color: var(--primary);
+        }
+
+        .preview-document {
+            display: none;
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 28px 34px;
+            min-height: 320px;
+            max-height: 680px;
+            overflow-y: auto;
+            font-family: 'Sarabun', 'Segoe UI', sans-serif;
+            font-size: 0.98rem;
+            line-height: 1.75;
+            color: #1e293b;
+        }
+
+        .preview-document h1, .preview-document h2, .preview-document h3, .preview-document h4 {
+            color: var(--primary);
+            margin-top: 1.2em;
+            margin-bottom: 0.5em;
+        }
+
+        .preview-document table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 14px 0;
+            font-size: 0.92rem;
+        }
+
+        .preview-document th, .preview-document td {
+            border: 1px solid #cbd5e1;
+            padding: 9px 12px;
+            text-align: left;
+        }
+
+        .preview-document th {
+            background-color: var(--primary-soft);
+            color: var(--primary);
+            font-weight: 700;
+        }
+
+        .preview-document tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+
+        @media (max-width: 960px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+            .sidebar {
+                position: static;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<header class="app-header">
+    <div>
+        <h1>ระบบบริหารจัดการโครงการและนโยบายสาธารณสุขครบวงจร</h1>
+        <p>AI Vision OCR (LM Studio) &bull; มาตรฐาน/KPI/Template &bull; รายงานวิเคราะห์ &bull; รายงานรอบที่ 1 &bull; แผนงานและรายงานรอบที่ 2</p>
+    </div>
+    <span class="app-badge">MOPH Supervision &amp; Vision OCR • Local LM Studio</span>
+</header>
+
+<div class="container">
+    <aside class="sidebar">
+        <h2>ขั้นตอนการทำงาน (6 ขั้นตอน)</h2>
+        <button type="button" class="step-btn active" onclick="switchPhase(0)">
+            <span class="step-btn-title">0. OCR ข้อมูล และเพิ่ม มาตรฐาน/KPI/Template/เกณฑ์</span>
+            <span class="step-btn-sub">สกัดข้อมูลและเติมเกณฑ์มาตรฐาน KPI Template ส่งให้ขั้นตอนที่ 1</span>
+        </button>
+        <button type="button" class="step-btn" onclick="switchPhase(1)">
+            <span class="step-btn-title">1. สรุปรายงานวิเคราะห์ผลการดำเนินงาน</span>
+            <span class="step-btn-sub">วิเคราะห์เทียบเกณฑ์/KPI รับตรวจนิเทศ และรับคำแนะนำส่งต่อ</span>
+        </button>
+        <button type="button" class="step-btn" onclick="switchPhase(2)">
+            <span class="step-btn-title">2. เขียนรายงานรอบที่ 1</span>
+            <span class="step-btn-sub">จัดทำรายงานรอบที่ 1 เน้นสถานการณ์ ช่องว่าง แผนแก้ปัญหา และนิยามเกณฑ์</span>
+        </button>
+        <button type="button" class="step-btn" onclick="switchPhase(3)">
+            <span class="step-btn-title">3. ทำแผนการดำเนินงาน</span>
+            <span class="step-btn-sub">รวมข้อมูล+รายงาน+คำแนะนำผู้ตรวจฯ สร้างแผนงาน โครงการ Timeline และ Checklist</span>
+        </button>
+        <button type="button" class="step-btn" onclick="switchPhase(4)">
+            <span class="step-btn-title">4. เขียนรายงานรอบที่ 2</span>
+            <span class="step-btn-sub">เน้นผลการดำเนินงานและผลลัพธ์ รับ Comment จากผู้ตรวจและคณะ</span>
+        </button>
+        <button type="button" class="step-btn" onclick="switchPhase(5)">
+            <span class="step-btn-title">5. ทำแผนงานในปีถัดไป</span>
+            <span class="step-btn-sub">นำรายงานรอบที่ 2+คำแนะนำ สร้างแผนงานโครงการ Timeline และ Checklist</span>
+        </button>
+
+        <div class="workflow-box">
+            <strong>แนวทางการใช้งานต่อเนื่อง (0 → 5):</strong><br>
+            • <strong>0:</strong> ทำ OCR และเพิ่ม มาตรฐาน / KPI / Template / เกณฑ์ต่างๆ แล้วส่งให้ขั้นตอนที่ 1<br>
+            • <strong>1 → 2:</strong> สรุปรายงานวิเคราะห์ แล้วเขียนรายงานรอบที่ 1<br>
+            • <strong>3 → 4 → 5:</strong> จัดทำแผนการดำเนินงาน เขียนรายงานรอบที่ 2 และวางแผนงานในปีถัดไป
+        </div>
+
+        <div class="param-group">
+            <h3>ตั้งค่าการเชื่อมต่อ AI (LM Studio)</h3>
+            <div class="form-group">
+                <label for="lmUrl">API Endpoint</label>
+                <input type="text" id="lmUrl" class="form-control" value="http://localhost:1234/v1/chat/completions">
+            </div>
+            <div class="form-group">
+                <label for="modelName">Vision / LLM Model Name</label>
+                <input type="text" id="modelName" class="form-control" value="gemma-4-e4b-it">
+            </div>
+            <div class="form-group">
+                <label for="pdfScale">ความละเอียดภาพ PDF (OCR)</label>
+                <select id="pdfScale" class="form-control">
+                    <option value="1.5">1.5x (มาตรฐาน - เร็ว)</option>
+                    <option value="2.0" selected>2.0x (แนะนำ - ตารางและกราฟชัด)</option>
+                    <option value="2.5">2.5x (สูง - ตัวอักษรเล็ก)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="tempRange">Temperature</label>
+                <div class="temp-row">
+                    <input type="range" id="tempRange" min="0.1" max="1.0" step="0.1" value="0.2" style="flex-grow: 1;">
+                    <span id="tempVal" class="temp-badge">0.2</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <main class="workspace">
+        <!-- ส่วนอัปโหลดและให้ AI Vision (OCR) อ่านภาพ/แผนภูมิ/PDF -->
+        <section class="card">
+            <div class="card-header">
+                <h3 class="card-title">ขั้นตอนที่ 0: OCR ข้อมูล และเพิ่ม มาตรฐาน / KPI / Template / เกณฑ์ต่างๆ</h3>
+            </div>
+            <p class="card-desc">แปลงหน้า PDF หรือรูปภาพเป็นข้อความ/ตาราง Markdown ด้วย AI Vision OCR และเพิ่ม มาตรฐาน KPI Template หรือเกณฑ์ต่างๆ เพื่อส่งให้ขั้นตอนที่ 1 ทำต่อ</p>
+
+            <div class="file-input-wrapper">
+                <input type="file" id="fileInput" accept=".png, .jpg, .jpeg, .webp, .pdf" style="width: 100%; max-width: 520px;">
+                <div class="btn-group-center">
+                    <button type="button" class="btn btn-extract" onclick="processFileWithVisionAI(true)">ให้ AI Vision (OCR) อ่านและสร้างตาราง Markdown</button>
+                    <button type="button" class="btn btn-copy" onclick="processFileWithVisionAI(false)">สกัดเฉพาะข้อความดิบก่อน (ตรวจแก้ตัวเลขได้)</button>
+                </div>
+                <div id="extractStatus" style="margin-top: 10px; font-size: 0.9rem; color: var(--accent); font-weight: 600;"></div>
+            </div>
+
+            <label for="userInputBox" class="field-label">ข้อมูล OCR + มาตรฐาน / KPI / Template / เกณฑ์ต่างๆ / ข้อมูลส่งต่อ</label>
+            <textarea id="userInputBox" rows="7" placeholder="ผลการอ่าน OCR จากภาพ/แผนภูมิ/PDF จะปรากฏที่นี่ และสามารถพิมพ์/วาง มาตรฐาน KPI Template เกณฑ์ต่างๆ หรือผลลัพธ์จากขั้นตอนก่อนหน้าเพื่อส่งต่อได้..."></textarea>
+        </section>
+
+        <!-- ส่วน System Prompt และประมวลผล -->
+        <section class="card">
+            <div class="card-header">
+                <h3 id="phaseTitle" class="card-title">0. OCR ข้อมูล และเพิ่ม มาตรฐาน/KPI/Template/เกณฑ์</h3>
+                <button type="button" class="btn btn-copy btn-minor" onclick="copySystemPrompt()">คัดลอก System Prompt</button>
+            </div>
+            <p id="phaseNotice" class="card-desc">
+                ทำ OCR ข้อมูลจากไฟล์ และเพิ่ม มาตรฐาน KPI Template หรือเกณฑ์ต่างๆ ลงในช่องข้อมูลด้านบน แล้วประมวลผลหรือส่งต่อไปขั้นตอนที่ 1
+            </p>
+
+            <label for="systemPromptBox" class="field-label">System Prompt (แสดงและแก้ไขได้โดยตรง)</label>
+            <textarea id="systemPromptBox" rows="13" spellcheck="false"></textarea>
+
+            <button id="sendBtn" type="button" class="btn btn-send" onclick="submitToLMStudio()">
+                จัดเตรียมฐานข้อมูล มาตรฐาน KPI และ Template ส่งให้ขั้นตอนที่ 1 (LM Studio)
+            </button>
+
+            <div class="output-section">
+                <div class="card-header">
+                    <h3 class="card-title">ผลลัพธ์การวิเคราะห์ แผนงาน และรายงานจาก AI</h3>
+                    <div class="action-bar">
+                        <button type="button" class="btn btn-transfer btn-minor" onclick="transferOutputToInput()" title="นำผลลัพธ์ไปต่อท้ายข้อมูลเดิมในช่องด้านบนโดยไม่ลบของเก่า">➕ นำผลลัพธ์ไปต่อท้ายข้อมูลเดิม</button>
+                        <button type="button" class="btn btn-copy btn-minor" onclick="copyOutputText()">คัดลอก</button>
+                        <button type="button" class="btn btn-clear btn-minor" onclick="clearOutput()">ล้างข้อมูล</button>
+                        <button type="button" class="btn btn-download btn-minor" onclick="exportToWord()">ส่งออก Word</button>
+                    </div>
+                </div>
+
+                <div class="view-tabs">
+                    <button type="button" id="tabRawBtn" class="tab-btn active" onclick="switchOutputView('raw')">โค้ด Markdown / ข้อความแก้ไขได้</button>
+                    <button type="button" id="tabPreviewBtn" class="tab-btn" onclick="switchOutputView('preview')">ตัวอย่างรูปแบบเอกสารจริง (Preview)</button>
+                </div>
+
+                <textarea id="outputBox" rows="16" placeholder="ผลลัพธ์จากการวิเคราะห์ แผนงาน และรายงานจะแสดงที่นี่แบบเรียลไทม์..." oninput="updatePreviewIfVisible()"></textarea>
+                <div id="previewBox" class="preview-document"></div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script>
+    let currentPhase = 0;
+
+    document.getElementById('tempRange').addEventListener('input', (e) => {
+        document.getElementById('tempVal').innerText = parseFloat(e.target.value).toFixed(1);
+    });
+
+    const templates = {
+        0: {
+            title: "0. OCR ข้อมูล และเพิ่ม มาตรฐาน/KPI/Template/เกณฑ์",
+            notice: "ทำ OCR ข้อมูลจากไฟล์ และเพิ่ม มาตรฐาน KPI Template หรือเกณฑ์ต่างๆ ลงในช่องข้อมูลด้านบน เพื่อเตรียมส่งให้ขั้นตอนที่ 1 วิเคราะห์และทำต่อ",
+            btnText: "จัดเตรียมฐานข้อมูล มาตรฐาน KPI และ Template ส่งให้ขั้นตอนที่ 1 (LM Studio)",
+            system: `# Role & Persona
+คุณคือผู้ช่วยจัดการข้อมูลและเกณฑ์อ้างอิงด้านสาธารณสุข ทำหน้าที่จัดระเบียบข้อมูลที่สกัดได้จาก OCR ร่วมกับ มาตรฐาน KPI Template และเกณฑ์ต่างๆ ที่ผู้ใช้เพิ่มเติม ให้เป็นชุดข้อมูลตั้งต้นที่ครบถ้วน ชัดเจน และพร้อมให้ขั้นตอนที่ 1 นำไปวิเคราะห์ต่อ
+
+# Rules
+- ห้ามแต่งตัวเลข เกณฑ์ หรือข้อมูลเพิ่มเติมที่ไม่มีในข้อมูลต้นฉบับ
+- คงค่าตัวเลข หน่วยนับ ช่วงเวลา ชื่อพื้นที่/ตัวชี้วัด มาตรฐาน KPI เกณฑ์ และ Template ให้ตรงตามต้นฉบับ
+- จัดหมวดหมู่ให้ชัดเจนว่าส่วนใดคือ "ข้อมูลที่สกัดจาก OCR" และส่วนใดคือ "มาตรฐาน / KPI / Template / เกณฑ์ต่างๆ และบริบทเพิ่มเติม"`
+        },
+        1: {
+            title: "1. สรุปรายงานวิเคราะห์ผลการดำเนินงาน",
+            notice: "สรุปรายงานวิเคราะห์ผลการดำเนินงานจากข้อมูล มาตรฐาน KPI และเกณฑ์ในขั้นตอนที่ 0 เพื่อใช้รับการตรวจนิเทศและบันทึกคำแนะนำส่งต่อ",
+            btnText: "สรุปรายงานวิเคราะห์ผลการดำเนินงาน (LM Studio)",
+            system: `# 1. Role & Persona
+คุณคือ นักวิชาการสาธารณสุขและนักวิเคราะห์ข้อมูลด้านสาธารณสุข ทำหน้าที่สรุปรายงานวิเคราะห์ผลการดำเนินงานโดยเปรียบเทียบข้อมูลกับ มาตรฐาน KPI และเกณฑ์ที่กำหนดไว้ในขั้นตอนที่ 0 เพื่อใช้เป็นฐานข้อมูลในการรับตรวจนิเทศและรับคำแนะนำส่งต่อ
+
+# 2. Context & Goal
+วิเคราะห์ข้อมูลและเกณฑ์ที่ได้รับจากขั้นตอนที่ 0 อย่างเป็นระบบ โดยระบุภาพรวม แนวโน้ม การเปรียบเทียบกับเกณฑ์/KPI ช่องว่าง/จุดอ่อน และประเด็นสำคัญที่พร้อมให้นำไปรับการตรวจนิเทศและบันทึกคำแนะนำจากทีมผู้ตรวจราชการ
+
+# 3. Constraints & Formatting Rules
+- **DATA FIDELITY:** ห้ามแต่งตัวเลข เกณฑ์ หรือข้อมูลที่ไม่มีในข้อมูลนำเข้า หากไม่มีเกณฑ์หรือตัวเลขใดให้ระบุว่า *[รอเติมข้อมูลเพิ่มเติมจากหน่วยงานรับผิดชอบ]*
+- **ANALYSIS DEPTH:** วิเคราะห์ให้ครอบคลุมแนวโน้ม การเปรียบเทียบกับเกณฑ์/KPI และนัยสำคัญเชิงการดำเนินงาน/ตรวจนิเทศ
+- **Language:** ใช้ภาษาที่เป็นทางการ ชัดเจน กระชับ และเป็นระบบ
+
+# 4. Output Structure
+### สรุปรายงานวิเคราะห์ผลการดำเนินงาน
+#### บทสรุปสำหรับผู้บริหารและภาพรวมเทียบเกณฑ์/KPI
+#### การวิเคราะห์ตัวเลข แนวโน้ม และการเปรียบเทียบกับมาตรฐาน/เกณฑ์
+#### ช่องว่าง จุดอ่อน และประเด็นรับการตรวจนิเทศ / คำแนะนำส่งต่อ`
+        },
+        2: {
+            title: "2. เขียนรายงานรอบที่ 1",
+            notice: "จัดทำรายงานรอบที่ 1 เน้นสถานการณ์ปัญหา ช่องว่าง/จุดอ่อน แผนแก้ไขปัญหา และนิยามเกณฑ์/ตัวชี้วัด โดยอิงข้อมูลและผลวิเคราะห์ก่อนหน้า",
+            btnText: "ร่างรายงานรอบที่ 1 (LM Studio)",
+            system: `# 1. Role & Persona
+คุณคือ นักวิชาการสาธารณสุขเชี่ยวชาญระดับสูง ผู้จัดทำ **รายงานการตรวจราชการและนิเทศงาน กรณีปกติ รอบที่ 1** (ช่วงครึ่งปีงบประมาณแรก: เดือนตุลาคม – มีนาคม) เพื่อนำเสนอผู้ตรวจราชการกระทรวงสาธารณสุขและคณะนิเทศงานอย่างเป็นทางการ ใช้ภาษาราชการที่แม่นยำทางวิชาการ กระชับ วิเคราะห์เชิงระบบ และเน้นความพร้อมของปัจจัยนำเข้าและกระบวนการ (Input & Process)
+
+# 2. Core Rules & Principles
+- **กรอบแนวคิดหลัก (Input & Process Assessment):** มุ่งประเมินความพร้อมในการขับเคลื่อนงานช่วงครึ่งปีงบประมาณแรก (ต.ค. – มี.ค.) เพื่อให้มั่นใจว่านโยบายถูกแปลงสู่การปฏิบัติได้อย่างเป็นรูปธรรม ครอบคลุม 6 จุดเน้นสำคัญ ได้แก่ (1) Policy Deployment (2) Resource Readiness (3) System & Process Design (4) Quick Win Monitoring (5) Risk Management และ (6) Coaching & Problem Solving
+- **การเชื่อมโยงแผนครึ่งปีหลัง:** ต้องสรุปปัญหาอุปสรรคเชิงระบบที่พบในช่วง ต.ค. – มี.ค. เชื่อมโยงไปสู่ **แผนการแก้ไขปัญหาและเร่งรัดการดำเนินงานในเดือนถัดไป (เม.ย. – ก.ย.)** และ **ประเด็นขอรับคำแนะนำ/การสนับสนุนจากผู้ตรวจราชการและคณะ** ให้สอดคล้องกัน
+- **ห้ามใส่เลขข้อ:** ห้ามใช้ตัวเลขลำดับนำหน้าหัวข้อหรือหัวข้อย่อย ให้ใช้ชื่อหัวข้อตัวหนาแทน
+- **ความแม่นยำของข้อมูล:** ห้ามแต่งตัวเลขหรือข้อมูลที่ไม่ปรากฏในบริบทตั้งต้น หากประเด็นใดไม่มีข้อมูลในเอกสารนำเข้าให้ระบุว่า *[รอเติมข้อมูลเพิ่มเติมจากหน่วยงานรับผิดชอบ]*
+
+# 3. Output Structure
+## รายงานการตรวจราชการและนิเทศงาน กรณีปกติ รอบที่ ๑
+**ประเด็นการตรวจราชการ/ตรวจนิเทศ:** [สรุปชื่อประเด็นหลักตามข้อมูล]
+**ช่วงเวลาติดตามผลการดำเนินงาน:** รอบที่ 1 (เดือนตุลาคม – มีนาคม) และแผนการดำเนินงานระยะถัดไป (เดือนเมษายน – กันยายน)
+
+### ส่วนที่ 1 ความพร้อมเชิงนโยบาย ปัจจัยนำเข้า และระบบงาน (Input & Process)
+- **การถ่ายทอดนโยบายสู่การปฏิบัติ (Policy Deployment):** สรุปความชัดเจนของการสื่อสาร การแปลงนโยบายกระทรวงสาธารณสุข/เขตสุขภาพ สู่แผนปฏิบัติการระดับจังหวัดและอำเภอ (One Province) รวมถึงนิยามเกณฑ์และตัวชี้วัดหลัก
+- **ความพร้อมของปัจจัยนำเข้า (Resource Readiness):** ประเมินความเพียงพอและการจัดสรรทรัพยากรหลัก 4 ด้าน ได้แก่ งบประมาณ กำลังคนด้านสุขภาพ ยาและเวชภัณฑ์ และโครงสร้างพื้นฐานด้านเทคโนโลยีสารสนเทศ (Digital Health)
+- **การวางระบบและกระบวนการทำงาน (System & Process Design):** สรุปการจัดตั้งกลไกการบริหารจัดการ การบูรณาการเครือข่ายบริการสุขภาพ (Service Plan) และระบบส่งต่อไร้รอยต่อในระดับพื้นที่
+
+### ส่วนที่ 2 ผลการขับเคลื่อนงานช่วงครึ่งปีแรกและการบริหารความเสี่ยง (ต.ค. – มี.ค.)
+- **ผลการขับเคลื่อนนโยบายเร่งด่วน (Quick Win Monitoring) และผลงานรายตัวชี้วัด:** สรุปความก้าวหน้าการดำเนินงานช่วงเดือนตุลาคม – มีนาคม เปรียบเทียบกับเกณฑ์/เป้าหมายที่กำหนด
+- **ตารางสรุปผลการดำเนินงานรอบที่ 1 (ต.ค. – มี.ค.):** ใช้ตาราง Markdown แสดงคอลัมน์: | ตัวชี้วัด/กิจกรรมหลัก/พื้นที่ | เกณฑ์/เป้าหมาย | ผลงานช่วง ต.ค. – มี.ค. | ส่วนต่าง/ความก้าวหน้า | สถานะและประเด็นที่พบ |
+- **การเฝ้าระวังและบริหารความเสี่ยง (Risk Management):** วิเคราะห์แนวโน้มปัญหาสุขภาพสำคัญในพื้นที่ (Area-Based) กลุ่มเสี่ยง/พื้นที่เสี่ยง รวมถึงเสถียรภาพทางการเงินการคลังของหน่วยบริการ (TPS / เงินบำรุง) เพื่อป้องกันภาวะวิกฤตล่วงหน้า
+
+### ส่วนที่ 3 แผนการแก้ไขปัญหาในเดือนถัดไป และประเด็นรับคำแนะนำจากผู้ตรวจราชการ (Coaching & Problem Solving)
+- **การวิเคราะห์ปัญหาอุปสรรคและข้อจำกัดเชิงระบบ:** สรุปสาเหตุรากเหง้า (Root Cause) ของช่องว่างหรือจุดอ่อนที่พบในช่วงครึ่งปีแรก
+- **ตารางแผนการแก้ไขปัญหาและเร่งรัดงานในเดือนถัดไป (เม.ย. – ก.ย.):** ใช้ตาราง Markdown แสดงคอลัมน์: | ประเด็นปัญหา/ช่องว่างที่พบ | มาตรการ/กิจกรรมแก้ไขปัญหา | พื้นที่/กลุ่มเป้าหมาย | ผู้รับผิดชอบหลัก | ระยะเวลาดำเนินการ | ตัวชี้วัดความสำเร็จ |
+- **ประเด็นสำหรับรับคำแนะนำและการสนับสนุนจากผู้ตรวจราชการและคณะ (Coaching & Problem Solving):** ระบุประเด็นปัญหาหรือข้อจำกัดเชิงระบบที่เกินศักยภาพระดับพื้นที่ (เช่น เชิงนโยบาย ระเบียบ ข้อกฎหมาย การจัดสรรทรัพยากร/งบประมาณ/อัตรากำลัง หรือการบูรณาการข้ามเขต/ข้ามหน่วยงาน) ที่ต้องการให้ผู้ตรวจราชการและคณะให้ข้อเสนอแนะเชิงวิชาการ/การบริหาร เพื่อปลดล็อกอุปสรรคในครึ่งปีหลัง
+`
+        },
+        3: {
+            title: "3. ทำแผนการดำเนินงาน",
+            notice: "นำข้อมูลตั้งต้น รายงาน และคำแนะนำจากผู้ตรวจราชการและคณะ มาสร้างเป็น แผนงาน โครงการ Timeline และ Checklist สำหรับดำเนินกิจกรรมและส่งผลการดำเนินงาน",
+            btnText: "สร้างแผนงาน โครงการ Timeline และ Checklist (LM Studio)",
+            system: `# 1. Role & Persona
+คุณคือผู้เชี่ยวชาญด้านการวางแผนโครงการและระบบการตรวจนิเทศทางสาธารณสุข ทำหน้าที่นำข้อมูลตั้งต้น รายงานการวิเคราะห์/รายงานรอบที่ 1 และคำแนะนำ/ข้อเสนอแนะจากผู้ตรวจราชการและคณะ มาสร้างเป็น แผนงาน โครงการ Timeline และ Checklist สำหรับดำเนินกิจกรรมและส่งผลการดำเนินงานเพื่อเตรียมความพร้อมสู่รอบที่ 2
+
+# 2. Input & Integration Rules
+- นำประเด็นจากข้อมูล/เกณฑ์/KPI รายงานที่จัดทำแล้ว และคำแนะนำจากผู้ตรวจราชการและคณะ มาเชื่อมโยงให้ครบถ้วน และรักษาความถูกต้องของรอบเวลาให้สอดคล้องกับบริบทจริง
+- แยกให้ชัดเจนระหว่างกิจกรรมที่หน่วยงานในพื้นที่ดำเนินการเอง กับประเด็นเชิงนโยบาย/ระเบียบ/ทรัพยากรที่ต้องประสานหรือผลักดันผ่านผู้ตรวจราชการ เขตสุขภาพ หรือหน่วยงานที่เกี่ยวข้อง
+- ห้ามแต่งตัวเลขหรือข้อมูลใหม่ หากข้อมูลส่วนใดยังไม่ระบุให้ใส่ *[รอเติมข้อมูลเพิ่มเติมจากหน่วยงานรับผิดชอบ]*
+- จัดโครงสร้างให้ชัดเจนประกอบด้วย แผนงาน/โครงการ Timeline และ Checklist
+
+# 3. Output Structure
+## แผนการดำเนินงานและติดตามผลการตรวจนิเทศ
+### การเชื่อมโยงข้อมูล รายงาน และคำแนะนำจากผู้ตรวจราชการและคณะ
+### ตารางแผนงานและโครงการ
+| แผนงาน/โครงการ | เป้าหมาย/KPI/เกณฑ์ | กิจกรรมหลัก | ผู้รับผิดชอบ | ทรัพยากร/งบประมาณ |
+### ตาราง Timeline การดำเนินงาน
+| กิจกรรม/ขั้นตอน | ช่วงเวลาดำเนินการ | สถานะ/ระยะงาน | ผลงานส่งมอบ (Deliverable) |
+### Checklist การดำเนินงานและการส่งผลการดำเนินงาน
+รายการตรวจสอบแบบ [ ] ที่ระบุสิ่งที่ต้องทำ หลักฐาน/ข้อมูลที่ต้องเตรียม และจุดตรวจสอบก่อนส่งผลการดำเนินงาน
+`
+        },
+        4: {
+            title: "4. เขียนรายงานรอบที่ 2",
+            notice: "จัดทำรายงานรอบที่ 2 โดยเน้นผลการดำเนินงานและผลลัพธ์ เทียบกับเกณฑ์/แผนที่วางไว้ เพื่อรับการตรวจและ Comment จากผู้ตรวจราชการและคณะ",
+            btnText: "ร่างรายงานรอบที่ 2 เน้นผลการดำเนินงานและผลลัพธ์ (LM Studio)",
+            system: `# 1. Role & Persona
+คุณคือ นักวิชาการสาธารณสุขเชี่ยวชาญระดับสูง ผู้เรียบเรียง **รายงานการตรวจราชการและนิเทศงาน รอบที่ 2** (มุ่งเน้นผลผลิตและผลสัมฤทธิ์: Output & Outcome ช่วงครึ่งปีงบประมาณหลัง: เมษายน – กันยายน) เพื่อนำเสนอผู้ตรวจราชการกระทรวงสาธารณสุขและคณะนิเทศงานอย่างเป็นทางการ ใช้ภาษาราชการที่แม่นยำทางวิชาการ กระชับ และวิเคราะห์ผลลัพธ์ที่เกิดขึ้นจริงกับประชาชนและระบบบริการ
+
+# 2. Core Principles & Focus Areas (6 จุดเน้น รอบที่ 2)
+- **เน้นผลผลิตและผลสัมฤทธิ์ (Output & Outcome):** ประเมินความก้าวหน้าและผลสำเร็จช่วงครึ่งปีหลัง โดยต้องจัดโครงสร้างให้ครอบคลุมและสะท้อนครบทั้ง 6 จุดเน้น ดังนี้:
+  1. **การประเมินผลสัมฤทธิ์ตามตัวชี้วัด (KPIs Achievement):** เปรียบเทียบผลงานกับเกณฑ์เป้าหมายรายตัวชี้วัดตามคำรับรองการปฏิบัติราชการ (PA) และตัวชี้วัดตรวจราชการ
+  2. **การติดตามผลการแก้ไขปัญหาจากรอบที่ 1 (Follow-up & Corrective Action):** ติดตามความคืบหน้าและผลลัพธ์ของการนำข้อเสนอแนะและแผนแก้ปัญหาจากรอบที่ 1 ไปปฏิบัติจริงในพื้นที่
+  3. **การประเมินผลลัพธ์และผลกระทบต่อประชาชน (Health Outcome & Impact):** วิเคราะห์ผลลัพธ์ที่เกิดขึ้นจริงกับประชาชน เช่น การเข้าถึงบริการ คุณภาพบริการ ผลลัพธ์ทางสุขภาพ/การลดความเสี่ยง และความพึงพอใจของผู้รับบริการ
+  4. **ประสิทธิภาพการบริหารจัดการและธรรมาภิบาล (Efficiency & Governance):** สรุปการเบิกจ่ายงบประมาณ สถานะทางการเงินการคลังของหน่วยบริการหลังปรับแผน รวมถึงความโปร่งใสและธรรมาภิบาล
+  5. **การถอดบทเรียนและค้นหาต้นแบบที่ดี (Best Practice & Innovation):** สกัดนวัตกรรมหรือรูปแบบการดำเนินงานที่โดดเด่นในระดับจังหวัด พร้อมปัจจัยแห่งความสำเร็จและศักยภาพในการขยายผลระดับเขต/ประเทศ
+  6. **การวางแผนเชื่อมโยงสู่ปีงบประมาณถัดไป (Sustainability & Future Planning):** สรุปความยั่งยืน ข้อท้าทายที่เหลืออยู่ และประเด็นรับ Comment จากผู้ตรวจฯ เพื่อใช้เป็นฐานข้อมูลวางแผนยุทธศาสตร์และงบประมาณในปีถัดไป
+- **ความแม่นยำของข้อมูล:** ห้ามแต่งตัวเลข เกณฑ์ หรือข้อมูลที่ไม่ปรากฏในบริบท หากส่วนใดไม่มีข้อมูลในบริบทให้ระบุว่า *[รอเติมข้อมูลเพิ่มเติมจากหน่วยงานรับผิดชอบ]*
+
+# 3. Output Structure
+## รายงานผลการดำเนินงานและผลลัพธ์ รอบที่ ๒
+**ประเด็นการตรวจราชการ/ตรวจนิเทศ:** [สรุปชื่อประเด็นหลักตามข้อมูล]
+**ช่วงเวลาติดตามผลการดำเนินงาน:** รอบที่ 2 (เมษายน – กันยายน)
+
+### ภาพรวมผลการดำเนินงานและผลลัพธ์ที่เกิดขึ้นจริง
+สรุปภาพรวมผลผลิตและผลลัพธ์ช่วงครึ่งปีหลัง และความก้าวหน้าในการติดตามการแก้ไขปัญหาจากรอบที่ 1
+
+### ตารางสรุปผลการดำเนินงานและผลลัพธ์เทียบเกณฑ์/เป้าหมาย
+| รายการ/ตัวชี้วัด/โครงการ | เกณฑ์/เป้าหมาย (PA/ตรวจราชการ) | ผลงานและผลลัพธ์รอบที่ 2 | การติดตามผลจากรอบที่ 1 และผลลัพธ์ที่เกิดขึ้น | สถานะและหมายเหตุ |
+
+### การวิเคราะห์ตามจุดเน้นการตรวจราชการ รอบที่ 2
+- **ผลสัมฤทธิ์ตามตัวชี้วัด (KPIs Achievement):** สรุปความสำเร็จเทียบเกณฑ์ PA และตัวชี้วัดตรวจราชการ
+- **ผลการติดตามการแก้ไขปัญหาจากรอบที่ 1 (Follow-up & Corrective Action):** สรุปความก้าวหน้าและผลลัพธ์ของการแก้ปัญหาที่ค้างจากรอบที่ 1
+- **ผลลัพธ์และผลกระทบต่อประชาชน (Health Outcome & Impact):** สรุปผลลัพธ์ด้านการเข้าถึงบริการ คุณภาพ ผลลัพธ์ทางสุขภาพ และความพึงพอใจของประชาชน
+- **ประสิทธิภาพการบริหารจัดการและธรรมาภิบาล (Efficiency & Governance):** สรุปการใช้งบประมาณ สถานะการเงินการคลังหลังปรับแผน และธรรมาภิบาล
+- **การถอดบทเรียนและต้นแบบที่ดี (Best Practice & Innovation):** ระบุรูปแบบ/นวัตกรรมที่โดดเด่น ปัจจัยแห่งความสำเร็จ และแนวทางการขยายผล
+
+### การเชื่อมโยงสู่ปีงบประมาณถัดไปและประเด็นรับ Comment จากผู้ตรวจและคณะ
+- **ความยั่งยืนและข้อท้าทายที่ยังคงเหลืออยู่ (Sustainability & Future Planning):** สรุปจุดที่ต้องสานต่อและฐานข้อมูลสำหรับวางแผนยุทธศาสตร์/งบประมาณปีถัดไป
+- **ประเด็นรับ Comment และข้อเสนอแนะจากผู้ตรวจราชการและคณะ:** ระบุประเด็นที่ต้องการรับการตรวจประเมินและข้อเสนอแนะเชิงนโยบาย/วิชาการ
+			`
+        },
+        5: {
+            title: "5. ทำแผนงานในปีถัดไป",
+            notice: "นำรายงานรอบที่ 2 และคำแนะนำ/Comment จากผู้ตรวจราชการและคณะ มาสร้างเป็น แผนงานโครงการ Timeline และ Checklist สำหรับปีถัดไป",
+            btnText: "จัดทำแผนงานปีถัดไป โครงการ Timeline และ Checklist (LM Studio)",
+            system: `# 1. Role & Persona
+คุณคือผู้เชี่ยวชาญด้านการวางแผนยุทธศาสตร์และแผนปฏิบัติการสาธารณสุข ทำหน้าที่นำรายงานผลการดำเนินงานและผลลัพธ์รอบที่ 2 ร่วมกับคำแนะนำ/Comment และแนวทางเปรียบเทียบจากผู้ตรวจราชการและคณะ มาจัดทำ **แผนงานโครงการ Timeline และ Checklist สำหรับปีงบประมาณถัดไป** เพื่อต่อยอดความยั่งยืน ขยายผลต้นแบบ และปลดล็อกข้อจำกัดเชิงโครงสร้าง
+
+# 2. Input & Planning Rules
+- อ้างอิงผลลัพธ์จากรายงานรอบที่ 2 และคำแนะนำ/Comment/แนวทางเปรียบเทียบจากผู้ตรวจราชการและคณะเป็นหลัก
+- ยึดปฏิทินปีงบประมาณราชการไทยอย่างเคร่งครัด:
+  - ไตรมาสที่ 1: ตุลาคม – ธันวาคม
+  - ไตรมาสที่ 2: มกราคม – มีนาคม
+  - ไตรมาสที่ 3: เมษายน – มิถุนายน
+  - ไตรมาสที่ 4: กรกฎาคม – กันยายน
+- แยกให้ชัดเจนระหว่างแผนงาน/โครงการที่หน่วยงานในพื้นที่ขับเคลื่อนเอง กับประเด็นเชิงนโยบาย/สิทธิประโยชน์/ระเบียบ/งบประมาณที่ต้องผลักดันหรือประสานระดับเขตสุขภาพ/หน่วยงานที่เกี่ยวข้อง
+- ห้ามแต่งตัวเลข เกณฑ์ หรือข้อมูลที่ไม่มีในบริบท หากส่วนใดยังไม่ระบุให้ใส่ *[รอเติมข้อมูลเพิ่มเติมจากหน่วยงานรับผิดชอบ]* (หลีกเลี่ยงการใช้ตัวแปรสมมติเช่น X% หรือ Y% โดยไม่ระบุที่มา)
+- จัดโครงสร้างให้ชัดเจนประกอบด้วย แผนงานโครงการ Timeline และ Checklist สำหรับปีถัดไป
+
+# 3. Output Structure
+## แผนงานประจำปีถัดไป
+**ประเด็นหลัก:** [สรุปชื่อประเด็นตามข้อมูล]
+**ปีงบประมาณที่วางแผน:** [ระบุปีงบประมาณตามบริบท หรือ *[รอเติมข้อมูลเพิ่มเติมจากหน่วยงานรับผิดชอบ]*]
+
+### การสังเคราะห์ผลลัพธ์รอบที่ 2 และคำแนะนำ/Comment จากผู้ตรวจและคณะ
+สรุปความก้าวหน้าและผลลัพธ์รอบที่ 2 ข้อท้าทาย/ช่องว่างที่เหลืออยู่ บทเรียนเปรียบเทียบ/ต้นแบบ และทิศทางหลักของแผนปีถัดไป
+
+### ตารางแผนงานและโครงการปีถัดไป
+| แผนงาน/โครงการปีถัดไป | เป้าหมาย/KPI/เกณฑ์ | กิจกรรมและแนวทางขับเคลื่อน | ผู้รับผิดชอบ | ทรัพยากร/งบประมาณ |
+| :--- | :--- | :--- | :--- | :--- |
+
+### ตาราง Timeline แผนงานปีถัดไป
+| แผนงาน/โครงการ | ไตรมาสที่ 1 (ต.ค. – ธ.ค.) | ไตรมาสที่ 2 (ม.ค. – มี.ค.) | ไตรมาสที่ 3 (เม.ย. – มิ.ย.) | ไตรมาสที่ 4 (ก.ค. – ก.ย.) |
+| :--- | :--- | :--- | :--- | :--- |
+
+### Checklist การเตรียมความพร้อมและขับเคลื่อนแผนปีถัดไป
+จัดทำรายการตรวจสอบแบบ [ ] แบ่งเป็น:
+- **การเตรียมความพร้อมและกำกับดูแล:** โครงสร้างการทำงาน ตัวชี้วัด คู่มือ/มาตรฐาน และข้อมูลฐาน
+- **การขับเคลื่อนและประสานความร่วมมือ:** การดำเนินกิจกรรมในพื้นที่ การพัฒนาบุคลากร และการผลักดันเชิงนโยบาย/เครือข่าย
+- **การติดตามประเมินผลและส่งมอบงาน:** หลักฐานเชิงประจักษ์ การวัดผลลัพธ์ และจุดตรวจสอบรายไตรมาส/สิ้นปีงบประมาณ
+`
+        }
+    };
+
+    function switchPhase(phaseNum) {
+        currentPhase = phaseNum;
+        const buttons = document.querySelectorAll('.step-btn');
+        buttons.forEach((btn) => {
+            const onclickAttr = btn.getAttribute('onclick') || '';
+            if (onclickAttr === `switchPhase(${phaseNum})`) btn.classList.add('active');
+            else btn.classList.remove('active');
+        });
+        const template = templates[phaseNum];
+        if (template) {
+            document.getElementById('phaseTitle').innerText = template.title;
+            document.getElementById('phaseNotice').innerText = template.notice;
+            document.getElementById('systemPromptBox').value = template.system;
+            document.getElementById('sendBtn').innerText = template.btnText;
+        }
+    }
+
+    window.onload = function() {
+        switchPhase(0);
+    };
+
+    function copySystemPrompt() {
+        const text = document.getElementById('systemPromptBox').value;
+        if (!text.trim()) return;
+        navigator.clipboard.writeText(text).then(() => {
+            alert('คัดลอก System Prompt เรียบร้อยแล้ว');
+        });
+    }
+
+    function transferOutputToInput() {
+        const outputText = document.getElementById('outputBox').value.trim();
+        const userInputBox = document.getElementById('userInputBox');
+        
+        if (!outputText) {
+            alert('ยังไม่มีผลลัพธ์ให้ส่งต่อ กรุณาประมวลผลรายงานก่อนครับ');
+            return;
+        }
+
+        const currentInput = userInputBox.value.trim();
+        const phaseLabels = {
+            0: "=== ข้อมูล OCR และมาตรฐาน/KPI/Template/เกณฑ์ (จากขั้นตอนที่ 0) ===",
+            1: "=== สรุปรายงานวิเคราะห์ผลการดำเนินงาน (จากขั้นตอนที่ 1) ===",
+            2: "=== รายงานรอบที่ 1 (จากขั้นตอนที่ 2) ===",
+            3: "=== แผนการดำเนินงาน โครงการ Timeline และ Checklist (จากขั้นตอนที่ 3) ===",
+            4: "=== รายงานผลการดำเนินงานและผลลัพธ์ รอบที่ 2 (จากขั้นตอนที่ 4) ===",
+            5: "=== แผนงานในปีถัดไป โครงการ Timeline และ Checklist (จากขั้นตอนที่ 5) ==="
+        };
+        const headerLabel = phaseLabels[currentPhase] || "=== ข้อมูลเพิ่มเติม ===";
+
+        if (currentInput) {
+            userInputBox.value = `${currentInput}\n\n${headerLabel}\n${outputText}`;
+        } else {
+            userInputBox.value = `${headerLabel}\n${outputText}`;
+        }
+
+        userInputBox.scrollTop = userInputBox.scrollHeight;
+        userInputBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        alert('นำผลลัพธ์ไป "ต่อท้าย" ข้อมูลเดิมเรียบร้อยแล้ว (ข้อมูลเก่าไม่ถูกลบ)');
+    }
+
+    function switchOutputView(mode) {
+        const outputBox = document.getElementById('outputBox');
+        const previewBox = document.getElementById('previewBox');
+        const tabRawBtn = document.getElementById('tabRawBtn');
+        const tabPreviewBtn = document.getElementById('tabPreviewBtn');
+
+        if (mode === 'preview') {
+            previewBox.innerHTML = (typeof marked !== 'undefined')
+                ? marked.parse(outputBox.value || '*ยังไม่มีเนื้อหารายงาน*')
+                : outputBox.value.replace(/\n/g, '<br>');
+            outputBox.style.display = 'none';
+            previewBox.style.display = 'block';
+            tabPreviewBtn.classList.add('active');
+            tabRawBtn.classList.remove('active');
+        } else {
+            previewBox.style.display = 'none';
+            outputBox.style.display = 'block';
+            tabRawBtn.classList.add('active');
+            tabPreviewBtn.classList.remove('active');
+        }
+    }
+
+    function updatePreviewIfVisible() {
+        const previewBox = document.getElementById('previewBox');
+        if (previewBox.style.display === 'block' && typeof marked !== 'undefined') {
+            previewBox.innerHTML = marked.parse(document.getElementById('outputBox').value || '');
+        }
+    }
+
+    function clearOutput() {
+        document.getElementById('outputBox').value = '';
+        document.getElementById('previewBox').innerHTML = '';
+    }
+
+    async function processFileWithVisionAI(asMarkdownTable = true) {
+        const fileInput = document.getElementById('fileInput');
+        const statusText = document.getElementById('extractStatus');
+        const userInputBox = document.getElementById('userInputBox');
+        const lmUrl = document.getElementById('lmUrl').value;
+        const modelName = document.getElementById('modelName').value;
+        const temperature = parseFloat(document.getElementById('tempRange').value);
+        const pdfScale = parseFloat(document.getElementById('pdfScale').value) || 2.0;
+
+        if (!fileInput.files[0]) {
+            alert('กรุณาเลือกไฟล์รูปภาพ แผนภูมิ หรือ PDF ก่อนครับ');
+            return;
+        }
+
+        const file = fileInput.files[0];
+        const fileName = file.name.toLowerCase();
+        statusText.innerText = "กำลังเตรียมไฟล์ให้ AI Vision (OCR) อ่าน...";
+        userInputBox.value = "";
+
+        const visionInstruction = asMarkdownTable
+            ? "จงทำ OCR และแปลงเนื้อหาทั้งหมดในหน้านี้ รวมถึงข้อความ ตาราง และตัวเลขในแผนภูมิ/กราฟ ออกมาเป็นภาษาไทยและ Markdown Table ที่สมบูรณ์ ถูกต้อง และครบถ้วนที่สุด ห้ามตกหล่นตัวเลขหรือหน่วยนับ"
+            : "จงทำ OCR ถอดข้อความ ตัวเลข และข้อมูลทั้งหมดที่ปรากฏในหน้านี้ (รวมถึงในตารางและแผนภูมิ/กราฟ) ออกมาเป็นข้อความดิบภาษาไทยแบบละเอียดครบทุกบรรทัดเพื่อนำไปตรวจสอบและแก้ไขตัวเลข";
+
+        try {
+            let base64Images = [];
+
+            if (fileName.match(/\.(png|jpg|jpeg|webp)$/)) {
+                const base64 = await fileToBase64(file);
+                base64Images.push(base64);
+            } else if (fileName.endsWith('.pdf')) {
+                statusText.innerText = "กำลังแปลงหน้า PDF เป็นรูปภาพเพื่อส่งให้ AI Vision (OCR)...";
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    statusText.innerText = `กำลังแปลงหน้า PDF ที่ ${i} จาก ${pdf.numPages} หน้า...`;
+                    const page = await pdf.getPage(i);
+                    const viewport = page.getViewport({ scale: pdfScale });
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+
+                    await page.render({ canvasContext: context, viewport: viewport }).promise;
+                    base64Images.push(canvas.toDataURL('image/png'));
+                }
+            } else {
+                alert('รองรับเฉพาะไฟล์รูปภาพ (.png, .jpg, .jpeg, .webp) และ .pdf เท่านั้นครับ');
+                statusText.innerText = "รูปแบบไฟล์ไม่รองรับ";
+                return;
+            }
+
+            let combinedText = "";
+            for (let idx = 0; idx < base64Images.length; idx++) {
+                statusText.innerText = `AI Vision (OCR) กำลังอ่านเนื้อหาหน้า ${idx + 1} จาก ${base64Images.length}...`;
+
+                const response = await fetch(lmUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        model: modelName,
+                        messages: [
+                            {
+                                role: "user",
+                                content: [
+                                    { type: "text", text: visionInstruction },
+                                    { type: "image_url", image_url: { url: base64Images[idx] } }
+                                ]
+                            }
+                        ],
+                        temperature: temperature,
+                        max_tokens: 2500,
+                        stream: false
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`LM Studio Error (${response.status}): ตรวจสอบว่าเปิดโปรแกรม LM Studio และโหลดโมเดล Vision อยู่หรือไม่`);
+                }
+
+                const result = await response.json();
+                const pageText = result.choices[0].message.content;
+                combinedText += `--- หน้า ${idx + 1} ---\n${pageText}\n\n`;
+                userInputBox.value = combinedText.trim();
+            }
+
+            statusText.innerText = asMarkdownTable
+                ? "AI Vision (OCR) อ่านและแปลงเป็นตาราง Markdown สำเร็จ"
+                : "สกัดข้อความดิบสำเร็จ สามารถตรวจแก้ตัวเลขในช่องด้านล่างแล้วกดประมวลผลต่อได้ทันที";
+
+        } catch (error) {
+            console.error(error);
+            statusText.innerText = "เกิดข้อผิดพลาดในการอ่านไฟล์";
+            alert("Error: " + error.message);
+        }
+    }
+
+    function fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = error => reject(error);
+        });
+    }
+
+    async function submitToLMStudio() {
+        const outputBox = document.getElementById('outputBox');
+        const rawText = document.getElementById('userInputBox').value.trim();
+        const systemPrompt = document.getElementById('systemPromptBox').value;
+        const lmUrl = document.getElementById('lmUrl').value;
+        const modelName = document.getElementById('modelName').value;
+        const temperature = parseFloat(document.getElementById('tempRange').value);
+
+        if (!rawText) {
+            alert("กรุณาให้ AI Vision (OCR) อ่านไฟล์ หรือวางข้อมูลในช่องบริบทตั้งต้นก่อนครับ");
+            return;
+        }
+
+        switchOutputView('raw');
+
+        const sendBtn = document.getElementById('sendBtn');
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = `กำลังประมวลผลการสังเคราะห์...`;
+        outputBox.value = "กำลังเชื่อมต่อ LM Studio เพื่อวิเคราะห์ข้อมูล...\n";
+
+        const finalPrompt = `อ้างอิงจากข้อมูลต่อไปนี้:\n---\n\n${rawText}\n\n---\nคำสั่ง: จงทำตาม System Prompt ที่กำหนดไว้ให้ครบถ้วน ชัดเจน และถูกต้องตามข้อมูลจริง`;
+
+        try {
+            const response = await fetch(lmUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    model: modelName,
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: finalPrompt }
+                    ],
+                    temperature: temperature,
+                    stream: true
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP Status ${response.status}: ไม่สามารถเชื่อมต่อ LM Studio ได้`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            outputBox.value = "";
+            let fullText = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const jsonStr = line.slice(6).trim();
+                        if (jsonStr === '[DONE]') continue;
+
+                        try {
+                            const parsed = JSON.parse(jsonStr);
+                            const content = parsed.choices[0]?.delta?.content;
+                            if (content) {
+                                fullText += content;
+                                outputBox.value = fullText.trim();
+                                outputBox.scrollTop = outputBox.scrollHeight;
+                            }
+                        } catch (e) {}
+                    }
+                }
+            }
+        } catch (error) {
+            outputBox.value = `เกิดข้อผิดพลาด: ${error.message}`;
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = templates[currentPhase].btnText;
+        }
+    }
+
+    function copyOutputText() {
+        const outputBox = document.getElementById('outputBox');
+        if (!outputBox.value.trim()) return;
+        navigator.clipboard.writeText(outputBox.value).then(() => {
+            alert('คัดลอกเนื้อหาเรียบร้อยแล้ว');
+        });
+    }
+
+    function exportToWord() {
+        const content = document.getElementById('outputBox').value;
+        if (!content.trim()) return;
+
+        const renderedHtml = (typeof marked !== 'undefined')
+            ? marked.parse(content)
+            : content.replace(/\n/g, '<br>');
+
+        const fileNames = {
+            0: 'ข้อมูล_OCR_มาตรฐาน_KPI_Template.doc',
+            1: 'สรุปรายงานวิเคราะห์ผลการดำเนินงาน.doc',
+            2: 'รายงานรอบที่1_ตรวจนิเทศ.doc',
+            3: 'แผนการดำเนินงาน_โครงการ_Timeline_Checklist.doc',
+            4: 'รายงานผลการดำเนินงานและผลลัพธ์_รอบที่2.doc',
+            5: 'แผนงานในปีถัดไป_Timeline_Checklist.doc'
+        };
+
+        const htmlHeader = `
+            <html xmlns:o="urn:schemas-microsoft-com:office:office"
+                  xmlns:w="urn:schemas-microsoft-com:office:word"
+                  xmlns="http://www.w3.org/TR/REC-html40">
+            <head>
+                <meta charset="utf-8">
+                <title>เอกสารตรวจนิเทศ สสจ.</title>
+                <style>
+                    @page {
+                        size: A4;
+                        margin: 1in;
+                    }
+                    body {
+                        font-family: "TH Sarabun PSK", "Cordia New", Arial, sans-serif;
+                        font-size: 16pt;
+                        line-height: 1.5;
+                    }
+                    h1, h2, h3, h4 {
+                        color: #14533c;
+                        margin-top: 12pt;
+                        margin-bottom: 6pt;
+                    }
+                    table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin: 10pt 0;
+                        font-size: 15pt;
+                    }
+                    th, td {
+                        border: 1px solid #333333;
+                        padding: 5pt 8pt;
+                        vertical-align: top;
+                    }
+                    th {
+                        background-color: #e4f3ec;
+                        font-weight: bold;
+                    }
+                </style>
+            </head>
+            <body>
+        `;
+
+        const htmlFooter = `
+            </body>
+            </html>
+        `;
+
+        const fullHtml = htmlHeader + renderedHtml + htmlFooter;
+        const blob = new Blob(['\ufeff' + fullHtml], { type: 'application/msword' });
+        const url = URL.createObjectURL(blob);
+        const file = document.createElement('a');
+        file.href = url;
+        file.download = fileNames[currentPhase] || 'Result_SystemPrompt.doc';
+        file.click();
+
+        setTimeout(() => URL.revokeObjectURL(url), 100);
+    }
+</script>
+
+</body>
+</html>
